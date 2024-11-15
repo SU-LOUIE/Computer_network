@@ -15,6 +15,7 @@ class ConferenceServer:
         self.client_conns = None
         self.mode = 'Client-Server'  # or 'P2P' if you want to support peer-to-peer conference mode
 
+
     async def handle_data(self, reader, writer, data_type):
         """
         running task: receive sharing stream data from a client and decide how to forward them to the rest clients
@@ -49,6 +50,8 @@ class MainServer:
         self.main_server = None
         self.conference_conns = None
         self.conference_servers = {}  # self.conference_servers[conference_id] = ConferenceManager
+        self.clients = []
+        self.clients_lock = threading.Lock()
 
     def handle_creat_conference(self, ):
         """
@@ -93,8 +96,13 @@ class MainServer:
                 if not frame_data:
                     print(f"[断开] {addr} 已断开连接。")
                     break
-
-                client_socket.sendall(raw_length + frame_data)  # 然后把这个数据给传回去
+                """
+                对于服务器来说，其实不需要去分辨数据对应的客户端是谁，直接发给客户端自行去判断就行了
+                客户端就要根据前16字节来判断是哪一个成员，然后找到对应的label去更新它的画面，如果没有的话还要新建一个画面，然后调整整个界面的布局
+                """
+                for c in self.clients:
+                    if c != client_socket:
+                        c.sendall(raw_length + frame_data)  # 然后把这个数据给传回去
         except Exception as e:
             print(f"[错误] 处理 {addr} 时出错: {e}")
         finally:
@@ -110,27 +118,17 @@ class MainServer:
             data.extend(packet)
         return data
 
-    # def broadcast(self, sender_socket, message):
-    #     """将消息广播给所有客户端，除发送者外"""
-    #     with self.threading_lock:
-    #         for client in self.clients:
-    #             if client != sender_socket:
-    #                 try:
-    #                     client.sendall(message)
-    #                 except Exception as e:
-    #                     print(f"[错误] 广播时出错: {e}")
-    #                     client.close()
-    #                     clients.remove(client)
-
     def start(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.bind((SERVER_IP, MAIN_SERVER_PORT))
+        server_socket.bind((self.server_ip, MAIN_SERVER_PORT))
         server_socket.listen(5)
         print('Server listening on port 8888')
 
         try:
             while True:
                 client_socket, address = server_socket.accept()
+                with self.clients_lock:
+                    self.clients.append(client_socket)
                 print(f"Accept connection from {address}")
                 client_thread = threading.Thread(target=self.handle_client, args=(client_socket, address), daemon=True)
                 client_thread.start()
